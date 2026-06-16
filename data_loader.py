@@ -33,6 +33,7 @@ class MyDataset(ListDataset):
     def load_data(filename, tokenizer, max_len):
         data = []
         all_tokens = []
+        original_texts = []
         with open(filename, encoding='utf-8') as f:
             f = f.read()
             f = json.loads(f)
@@ -40,6 +41,7 @@ class MyDataset(ListDataset):
               text = d['text']
               labels = d['labels']
               tokens = [i for i in text]
+              original_texts.append(text)
               if len(tokens) > max_len - 2:
                 tokens = tokens[:max_len - 2]
               tokens = ['[CLS]'] + tokens + ['[SEP]']
@@ -49,7 +51,7 @@ class MyDataset(ListDataset):
               for lab in labels:  # 这里需要加上CLS的位置, lab[3]不用加1，因为是实体结尾的后一位
                 label.append([lab[2]+1, lab[3], lab[1]])
               data.append((token_ids, label))  # label为[[start, end, entity], ...]
-        return data, all_tokens
+        return data, all_tokens, original_texts
 
 class Collate:
   def __init__(self, max_len, tag2id, device):
@@ -85,12 +87,12 @@ if __name__ == "__main__":
   from transformers import BertTokenizer
   max_len = 150
   tokenizer = BertTokenizer.from_pretrained('model_hub/chinese-bert-wwm-ext/vocab.txt')
-  train_dataset, train_callback = MyDataset(file_path='data/cner/mid_data/train.json', 
+  train_dataset, train_callback, train_original_texts = MyDataset(file_path='data/CMeEE/mid_data/train.json', 
               tokenizer=tokenizer, 
               max_len=max_len)
   print(train_dataset[0])
 
-  with open('data/cner/mid_data/labels.json') as fp:
+  with open('data/CMeEE/mid_data/labels.json') as fp:
     labels = json.load(fp)
   id2tag = {}
   tag2id = {}

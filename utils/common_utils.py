@@ -97,13 +97,14 @@ def set_logger(log_path):
     if not any(handler.__class__ == logging.FileHandler for handler in logger.handlers):
         file_handler = logging.FileHandler(log_path)
         formatter = logging.Formatter(
-            '%(asctime)s - %(levelname)s - %(filename)s - %(funcName)s - %(lineno)d - %(message)s')
+            '%(asctime)s - %(levelname)s - %(filename)s - %(funcName)s - %(lineno)d - %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S')
         file_handler.setFormatter(formatter)
         logger.addHandler(file_handler)
 
     if not any(handler.__class__ == logging.StreamHandler for handler in logger.handlers):
         stream_handler = logging.StreamHandler()
-        stream_handler.setFormatter(logging.Formatter('%(message)s'))
+        stream_handler.setFormatter(logging.Formatter('%(asctime)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S'))
         logger.addHandler(stream_handler)
 
 

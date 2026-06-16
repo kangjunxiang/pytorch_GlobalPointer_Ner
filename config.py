@@ -15,7 +15,7 @@ class Args:
 
         parser.add_argument('--bert_dir', default='../model_hub/bert-base-chinese/',
                             help='bert dir for uer')
-        parser.add_argument('--data_dir', default='./data/cner/',
+        parser.add_argument('--data_dir', default='./data/CMeEE/',
                             help='data dir for uer')
         parser.add_argument('--log_dir', default='./logs/',
                             help='log dir for uer')
@@ -62,8 +62,8 @@ class Args:
         parser.add_argument('--train_batch_size', default=32, type=int)
         parser.add_argument('--use_tensorboard', default="True")
         parser.add_argument('--use_efficient_globalpointer', default="True")
-
-
+        parser.add_argument('--model_type', default="bert", help='bert or roberta')
+        parser.add_argument('--only_test', action='store_true', help='仅运行测试，不训练')
 
         return parser
 

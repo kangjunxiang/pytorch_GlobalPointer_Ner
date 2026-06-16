@@ -4,7 +4,9 @@ import numpy as np
 from collections import defaultdict
 import torch
 from torch.utils.data import DataLoader, RandomSampler
-from transformers import BertTokenizer
+from transformers import AutoTokenizer
+import json
+from datetime import datetime
 
 import config
 import data_loader
@@ -23,23 +25,26 @@ if args.use_tensorboard == "True":
 
 
 class BertForNer:
-    def __init__(self, args, train_loader, dev_loader, test_loader, idx2tag, model, device):
+    def __init__(self, args, train_loader, dev_loader, test_loader, idx2tag, label_list, model, device, dev_callback=None, test_callback=None, original_texts=None):
         self.train_loader = train_loader
         self.dev_loader = dev_loader
         self.test_loader = test_loader
         self.args = args
         self.idx2tag = idx2tag
+        self.label_list = label_list
         self.model = model
         self.device = device
+        self.dev_callback = dev_callback
+        self.test_callback = test_callback
+        self.original_texts = original_texts
         if train_loader is not None:
             self.t_total = len(self.train_loader) * args.train_epochs
             self.optimizer, self.scheduler = build_optimizer_and_scheduler(args, model, self.t_total)
 
     def train(self):
-        # Train
         global_step = 0
         self.model.zero_grad()
-        eval_steps = self.args.eval_steps  # 每多少个step打印损失及进行验证
+        eval_steps = self.args.eval_steps
         best_f1 = 0.0
         for epoch in range(1, self.args.train_epochs+1):
             for step, batch_data in enumerate(self.train_loader):
@@ -48,7 +53,6 @@ class BertForNer:
                     batch = batch.to(self.device)
                 loss, logits = self.model(batch_data[0], batch_data[1], batch_data[2], batch_data[3])
 
-                # loss.backward(loss.clone().detach())
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.args.max_grad_norm)
                 self.optimizer.step()
@@ -77,11 +81,10 @@ class BertForNer:
             for eval_step, dev_batch_data in enumerate(self.dev_loader):
                 labels = dev_batch_data[3]
                 for dev_batch in dev_batch_data:
-                    dev_batch = dev_batch.to(device)
-                # logits:[8, 8, 150, 150]
-                _, logits = model(dev_batch_data[0], dev_batch_data[1], dev_batch_data[2], dev_batch_data[3])
+                    dev_batch = dev_batch.to(self.device)
+                _, logits = self.model(dev_batch_data[0], dev_batch_data[1], dev_batch_data[2], dev_batch_data[3])
                 batch_size = logits.size(0)
-                dev_callbak = dev_callback[eval_step * batch_size:(eval_step + 1) * batch_size]
+                dev_callbak = self.dev_callback[eval_step * batch_size:(eval_step + 1) * batch_size]
 
                 for i in range(batch_size):
                     pred_tmp = defaultdict(list)
@@ -90,7 +93,7 @@ class BertForNer:
                     for j in range(self.args.num_tags):
                         logit_ = logit[j, :len(tokens), :len(tokens)]
                         for start, end in zip(*np.where(logit_.cpu().numpy() > 0.5)):
-                            pred_tmp[id2tag[j]].append(["".join(tokens[start:end + 1]), start])
+                            pred_tmp[self.idx2tag[j]].append(["".join(tokens[start:end + 1]), start])
                     pred_entities.append(dict(pred_tmp))
 
                 for i in range(batch_size):
@@ -100,14 +103,14 @@ class BertForNer:
                     for j in range(self.args.num_tags):
                         logit_ = logit[j, :len(tokens), :len(tokens)]
                         for start, end in zip(*np.where(logit_.cpu().numpy() == 1)):
-                            true_tmp[id2tag[j]].append(["".join(tokens[start:end + 1]), start])
+                            true_tmp[self.idx2tag[j]].append(["".join(tokens[start:end + 1]), start])
                     true_entities.append(true_tmp)
 
-            total_count = [0 for _ in range(len(id2tag))]
-            role_metric = np.zeros([len(id2tag), 3])
+            total_count = [0 for _ in range(len(self.idx2tag))]
+            role_metric = np.zeros([len(self.idx2tag), 3])
             for pred, true in zip(pred_entities, true_entities):
-                tmp_metric = np.zeros([len(id2tag), 3])
-                for idx, _type in enumerate(label_list):
+                tmp_metric = np.zeros([len(self.idx2tag), 3])
+                for idx, _type in enumerate(self.label_list):
                     if _type not in pred:
                         pred[_type] = []
                     total_count[idx] += len(true[_type])
@@ -117,66 +120,108 @@ class BertForNer:
 
             mirco_metrics = np.sum(role_metric, axis=0)
             mirco_metrics = get_p_r_f(mirco_metrics[0], mirco_metrics[1], mirco_metrics[2])
-            # print('[eval] loss:{:.4f} precision={:.4f} recall={:.4f} f1_score={:.4f}'.format(tot_dev_loss, mirco_metrics[0], mirco_metrics[1], mirco_metrics[2]))
             return tot_dev_loss, mirco_metrics[0], mirco_metrics[1], mirco_metrics[2]
 
     def test(self, model_path):
+        import time
+        start_time = time.time()
+        logger.info('【test】开始测试，模型路径: {}'.format(model_path))
         model = globalpoint.GlobalPointerNer(self.args)
         model, device = load_model_and_parallel(model, self.args.gpu_ids, model_path)
         model.eval()
         pred_entities = []
+        result_entities = []
         true_entities = []
         with torch.no_grad():
-            for eval_step, dev_batch_data in enumerate(dev_loader):
-                labels = dev_batch_data[3]
-                for dev_batch in dev_batch_data:
-                    dev_batch = dev_batch.to(device)
-                # logits:[8, 8, 150, 150]
-                _, logits = model(dev_batch_data[0], dev_batch_data[1], dev_batch_data[2], dev_batch_data[3])
+            for eval_step, test_batch_data in enumerate(self.test_loader):
+                labels = test_batch_data[3]
+                for test_batch in test_batch_data:
+                    test_batch = test_batch.to(device)
+                _, logits = model(test_batch_data[0], test_batch_data[1], test_batch_data[2], test_batch_data[3])
                 batch_size = logits.size(0)
-                dev_callbak = dev_callback[eval_step * batch_size:(eval_step + 1) * batch_size]
+                test_callback = self.test_callback[eval_step * batch_size:(eval_step + 1) * batch_size]
 
                 for i in range(batch_size):
                     pred_tmp = defaultdict(list)
                     logit = logits[i, ...]
-                    tokens = dev_callbak[i]
+                    tokens = test_callback[i]
+                    sample_id = eval_step * batch_size + i
+                    if self.original_texts and sample_id < len(self.original_texts):
+                        full_text = self.original_texts[sample_id]
+                    else:
+                        full_text = "".join(tokens)
+                        if full_text.startswith('[CLS]'):
+                            full_text = full_text[5:]
+                        if full_text.endswith('[SEP]'):
+                            full_text = full_text[:-5]
+                    result_tmp = {
+                        'full_text': full_text,
+                        'entities': defaultdict(list)
+                    }
                     for j in range(self.args.num_tags):
                         logit_ = logit[j, :len(tokens), :len(tokens)]
                         for start, end in zip(*np.where(logit_.cpu().numpy() > 0.5)):
-                            pred_tmp[id2tag[j]].append(["".join(tokens[start:end + 1]), start])
+                            confidence = round(float(logit_[start, end].item()), 4)
+                            entity_text = "".join(tokens[start:end + 1])
+                            if entity_text.startswith('[CLS]'):
+                                entity_text = entity_text[5:]
+                            if entity_text.endswith('[SEP]'):
+                                entity_text = entity_text[:-5]
+                            entity_info = [entity_text, int(start), int(end), confidence]
+                            pred_tmp[self.idx2tag[j]].append(["".join(tokens[start:end + 1]), start])
+                            result_tmp['entities'][self.idx2tag[j]].append(entity_info)
                     pred_entities.append(dict(pred_tmp))
+                    result_entities.append(result_tmp)
 
                 for i in range(batch_size):
                     true_tmp = defaultdict(list)
                     logit = labels[i, ...]
-                    tokens = dev_callbak[i]
+                    tokens = test_callback[i]
                     for j in range(self.args.num_tags):
                         logit_ = logit[j, :len(tokens), :len(tokens)]
                         for start, end in zip(*np.where(logit_.cpu().numpy() == 1)):
-                            true_tmp[id2tag[j]].append(["".join(tokens[start:end + 1]), start])
+                            true_tmp[self.idx2tag[j]].append(["".join(tokens[start:end + 1]), start])
                     true_entities.append(true_tmp)
 
-            total_count = [0 for _ in range(len(id2tag))]
-            role_metric = np.zeros([len(id2tag), 3])
+            total_count = [0 for _ in range(len(self.idx2tag))]
+            role_metric = np.zeros([len(self.idx2tag), 3])
             for pred, true in zip(pred_entities, true_entities):
-                tmp_metric = np.zeros([len(id2tag), 3])
-                for idx, _type in enumerate(label_list):
+                tmp_metric = np.zeros([len(self.idx2tag), 3])
+                for idx, _type in enumerate(self.label_list):
                     if _type not in pred:
                         pred[_type] = []
                     total_count[idx] += len(true[_type])
                     tmp_metric[idx] += calculate_metric(true[_type], pred[_type])
 
                 role_metric += tmp_metric
-            logger.info(classification_report(role_metric, label_list, id2tag, total_count))
+            end_time = time.time()
+            test_time = end_time - start_time
+            logger.info('【test】测试结果：\n{}'.format(classification_report(role_metric, self.label_list, self.idx2tag, total_count, digits=4)))
+            logger.info('【test】测试耗时: {:.2f} 秒'.format(test_time))
+            
+            # 保存置信度文件 - 每个样本单独输出一行
+            os.makedirs('./json/', exist_ok=True)
+            current_date = datetime.now().strftime('%Y%m%d')
+            output_file = f'./json/globalpointer_{current_date}.json'
+            
+            with open(output_file, 'w', encoding='utf-8') as f:
+                for item in result_entities:
+                    output_item = {
+                        "full_text": item['full_text'],
+                        "entities": dict(item['entities'])
+                    }
+                    json_line = json.dumps(output_item, ensure_ascii=False)
+                    f.write(json_line + '\n')
+            
+            logger.info('【test】置信度文件已保存: {}'.format(output_file))
 
     def predict(self, raw_text, model_path):
+        logger.info('【predict】开始预测，输入文本: {}'.format(raw_text))
         model = globalpoint.GlobalPointerNer(self.args)
         model, device = load_model_and_parallel(model, self.args.gpu_ids, model_path)
         model.eval()
         with torch.no_grad():
-            tokenizer = BertTokenizer.from_pretrained(
-                os.path.join(self.args.bert_dir, 'vocab.txt'))
-            # tokens = fine_grade_tokenize(raw_text, tokenizer)
+            tokenizer = AutoTokenizer.from_pretrained(self.args.bert_dir)
             tokens = [i for i in raw_text]
             encode_dict = tokenizer.encode_plus(text=tokens,
                                                 max_length=self.args.max_seq_len,
@@ -197,9 +242,9 @@ class BertForNer:
               for j in range(self.args.num_tags):
                   logit_ = logit[j, :len(tokens), :len(tokens)]
                   for start, end in zip(*np.where(logit_.cpu().numpy() > 0.5)):
-                      pred_tmp[id2tag[j]].append(["".join(tokens[start:end + 1]), start-1])
+                      pred_tmp[self.idx2tag[j]].append(["".join(tokens[start:end + 1]), start-1])
 
-            logger.info(dict(pred_tmp))
+            logger.info('【predict】预测结果: {}'.format(dict(pred_tmp)))
 
 
 if __name__ == '__main__':
@@ -210,7 +255,7 @@ if __name__ == '__main__':
       model_name = 'bert-1'
     set_logger(os.path.join(args.log_dir, '{}.log'.format(model_name)))
     if data_name == "c":
-        args.data_dir = './data/cner'
+        args.data_dir = './data/CMeEE'
         data_path = os.path.join(args.data_dir, 'mid_data')
         label_list = read_json(data_path, 'labels')
         tag2id = {}
@@ -221,7 +266,7 @@ if __name__ == '__main__':
 
         logger.info(args)
         max_seq_len = args.max_seq_len
-        tokenizer = BertTokenizer.from_pretrained('model_hub/chinese-bert-wwm-ext/vocab.txt')
+        tokenizer = AutoTokenizer.from_pretrained(args.bert_dir)
 
         model = globalpoint.GlobalPointerNer(args)
         model, device = load_model_and_parallel(model, args.gpu_ids)
@@ -229,25 +274,35 @@ if __name__ == '__main__':
 
         collate = data_loader.Collate(max_len=max_seq_len, tag2id=tag2id, device=device)
 
-        train_dataset, _ = data_loader.MyDataset(file_path=os.path.join(data_path, 'train.json'),
+        train_dataset, _, _ = data_loader.MyDataset(file_path=os.path.join(data_path, 'train.json'),
                                                  tokenizer=tokenizer,
                                                  max_len=max_seq_len)
         print(train_dataset[0])
         train_loader = DataLoader(train_dataset, batch_size=args.train_batch_size, shuffle=True,
                                   collate_fn=collate.collate_fn)
-        dev_dataset, dev_callback = data_loader.MyDataset(file_path=os.path.join(data_path, 'dev.json'),
+        dev_dataset, dev_callback, _ = data_loader.MyDataset(file_path=os.path.join(data_path, 'dev.json'),
                                                           tokenizer=tokenizer,
                                                           max_len=max_seq_len)
         print(dev_dataset[0])
         dev_loader = DataLoader(dev_dataset, batch_size=args.eval_batch_size, shuffle=False,
                                 collate_fn=collate.collate_fn)
+        test_dataset, test_callback, original_texts = data_loader.MyDataset(file_path=os.path.join(data_path, 'test.json'),
+                                                           tokenizer=tokenizer,
+                                                           max_len=max_seq_len)
+        print(test_dataset[0])
+        test_loader = DataLoader(test_dataset, batch_size=args.eval_batch_size, shuffle=False,
+                                 collate_fn=collate.collate_fn)
 
-        bertForNer = BertForNer(args, train_loader, dev_loader, dev_loader, id2tag, model, device)
-        bertForNer.train()
+        bertForNer = BertForNer(args, train_loader, dev_loader, test_loader, id2tag, label_list, model, device, dev_callback, test_callback, original_texts)
 
-        model_path = './checkpoints/{}/model.pt'.format(model_name)
-        bertForNer.test(model_path)
+        if args.only_test:
+            model_path = os.path.join(args.output_dir, model_name, 'model.pt')
+            bertForNer.test(model_path)
+        else:
+            bertForNer.train()
+            model_path = os.path.join(args.output_dir, model_name, 'model.pt')
+            bertForNer.test(model_path)
 
-        raw_text = "虞兔良先生：1963年12月出生，汉族，中国国籍，无境外永久居留权，浙江绍兴人，中共党员，MBA，经济师。"
-        logger.info(raw_text)
-        bertForNer.predict(raw_text, model_path)
+            raw_text = "对儿童SARST细胞亚群的研究表明，与成人SARS相比，儿童细胞下降不明显，证明上述推测成立。"
+            logger.info(raw_text)
+            bertForNer.predict(raw_text, model_path)

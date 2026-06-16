@@ -1,7 +1,7 @@
 import math
 import torch
 import torch.nn as nn
-from transformers import BertModel
+from transformers import AutoModel
 
 class MultilabelCategoricalCrossentropy(nn.Module):
     """多标签分类的交叉熵
@@ -172,7 +172,7 @@ class GlobalPointer(nn.Module):
 class GlobalPointerNer(nn.Module):
     def __init__(self, args):
         super().__init__()
-        self.bert = BertModel.from_pretrained(args.bert_dir, output_hidden_states=True,
+        self.bert = AutoModel.from_pretrained(args.bert_dir, output_hidden_states=True,
                             hidden_dropout_prob=args.dropout_prob)
         if args.use_efficient_globalpointer == "True":
           self.global_pointer = EfficientGlobalPointer(hidden_size=768, heads=args.num_tags, head_size=args.head_size)
