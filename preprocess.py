@@ -33,7 +33,7 @@ class NerProcessor:
 
     def get_examples(self, raw_examples, set_type):
         examples = []
-        # 这里是从json数据中的字典中获取
+        # Read each example from the json list
         for i, item in enumerate(raw_examples):
             # print(i,item)
             text = item['text']

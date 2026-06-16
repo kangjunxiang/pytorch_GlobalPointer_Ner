@@ -27,7 +27,7 @@ class ListDataset(Dataset):
 
 
 
-# 加载数据集
+# Load dataset
 class MyDataset(ListDataset):
     @staticmethod
     def load_data(filename, tokenizer, max_len):
@@ -48,9 +48,9 @@ class MyDataset(ListDataset):
               all_tokens.append(tokens)
               token_ids = tokenizer.convert_tokens_to_ids(tokens)
               label = []
-              for lab in labels:  # 这里需要加上CLS的位置, lab[3]不用加1，因为是实体结尾的后一位
+              for lab in labels:  # The CLS position needs to be added here; lab[3] does not need +1 because it is the position right after the entity end
                 label.append([lab[2]+1, lab[3], lab[1]])
-              data.append((token_ids, label))  # label为[[start, end, entity], ...]
+              data.append((token_ids, label))  # label is in the form [[start, end, entity], ...]
         return data, all_tokens, original_texts
 
 class Collate:
@@ -66,11 +66,11 @@ class Collate:
       batch_token_type_ids = []
       for i, (token_ids, text_labels) in enumerate(batch):
           labels = np.zeros((len(self.tag2id), self.maxlen, self.maxlen))
-          batch_token_ids.append(token_ids)  # 前面已经限制了长度
+          batch_token_ids.append(token_ids)  # length has already been capped above
           batch_attention_mask.append([1] * len(token_ids))
           batch_token_type_ids.append([0] * len(token_ids))
           for start, end, label in text_labels:
-            # 排除SEP及之后的
+            # Exclude SEP and any position after it
             if end >= self.maxlen - 1:
               continue
             label_id = self.tag2id[label]

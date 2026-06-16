@@ -125,7 +125,7 @@ class BertForNer:
     def test(self, model_path):
         import time
         start_time = time.time()
-        logger.info('【test】开始测试，模型路径: {}'.format(model_path))
+        logger.info('[test] start testing, model path: {}'.format(model_path))
         model = globalpoint.GlobalPointerNer(self.args)
         model, device = load_model_and_parallel(model, self.args.gpu_ids, model_path)
         model.eval()
@@ -196,10 +196,10 @@ class BertForNer:
                 role_metric += tmp_metric
             end_time = time.time()
             test_time = end_time - start_time
-            logger.info('【test】测试结果：\n{}'.format(classification_report(role_metric, self.label_list, self.idx2tag, total_count, digits=4)))
-            logger.info('【test】测试耗时: {:.2f} 秒'.format(test_time))
-            
-            # 保存置信度文件 - 每个样本单独输出一行
+            logger.info('[test] test results:\n{}'.format(classification_report(role_metric, self.label_list, self.idx2tag, total_count, digits=4)))
+            logger.info('[test] test time cost: {:.2f} seconds'.format(test_time))
+
+            # Save confidence file - one line per sample
             os.makedirs('./json/', exist_ok=True)
             current_date = datetime.now().strftime('%Y%m%d')
             output_file = f'./json/globalpointer_{current_date}.json'
@@ -213,10 +213,10 @@ class BertForNer:
                     json_line = json.dumps(output_item, ensure_ascii=False)
                     f.write(json_line + '\n')
             
-            logger.info('【test】置信度文件已保存: {}'.format(output_file))
+            logger.info('[test] confidence file saved: {}'.format(output_file))
 
     def predict(self, raw_text, model_path):
-        logger.info('【predict】开始预测，输入文本: {}'.format(raw_text))
+        logger.info('[predict] start prediction, input text: {}'.format(raw_text))
         model = globalpoint.GlobalPointerNer(self.args)
         model, device = load_model_and_parallel(model, self.args.gpu_ids, model_path)
         model.eval()
@@ -244,7 +244,7 @@ class BertForNer:
                   for start, end in zip(*np.where(logit_.cpu().numpy() > 0.5)):
                       pred_tmp[self.idx2tag[j]].append(["".join(tokens[start:end + 1]), start-1])
 
-            logger.info('【predict】预测结果: {}'.format(dict(pred_tmp)))
+            logger.info('[predict] prediction result: {}'.format(dict(pred_tmp)))
 
 
 if __name__ == '__main__':
@@ -303,6 +303,6 @@ if __name__ == '__main__':
             model_path = os.path.join(args.output_dir, model_name, 'model.pt')
             bertForNer.test(model_path)
 
-            raw_text = "对儿童SARST细胞亚群的研究表明，与成人SARS相比，儿童细胞下降不明显，证明上述推测成立。"
+            raw_text = "对儿童SARST细胞亚群的研究表明，与成人SARS相比，儿童细胞下降不明显，证明上述推测成立。"  # Chinese test sample (kept as data)
             logger.info(raw_text)
             bertForNer.predict(raw_text, model_path)

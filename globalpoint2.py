@@ -48,7 +48,7 @@ class GlobalPointer(nn.Module):
         # outputs:(batch_size, seq_len, ent_type_size, inner_dim*2)
         outputs = torch.stack(outputs, dim=-2)
         # qw,kw:(batch_size, seq_len, ent_type_size, inner_dim)
-        qw, kw = outputs[...,:self.head_size], outputs[...,self.head_size:] # TODO:修改为Linear获取？
+        qw, kw = outputs[...,:self.head_size], outputs[...,self.head_size:] # TODO: switch to a Linear layer?
 
         if self.RoPE:
             # pos_emb:(batch_size, seq_len, inner_dim)
@@ -72,7 +72,7 @@ class GlobalPointer(nn.Module):
         # pad_mask = pad_mask_v&pad_mask_h
         logits = logits*pad_mask - (1-pad_mask)*1e12
 
-        # 排除下三角
+        # Mask out the lower triangle
         mask = torch.tril(torch.ones_like(logits), -1) 
         logits = logits - mask * 1e12
         
@@ -91,8 +91,8 @@ class GlobalPointerNer(nn.Module):
       sequence_output = output[0]
       logits = self.global_pointer(sequence_output, attention_masks.gt(0).long())
       if labels is None:
-        # scale返回
-        return logits
-      
+          # Scale and return
+          return logits
+
       loss = multilabel_categorical_crossentropy(logits, labels)
       return loss, logits

@@ -34,7 +34,7 @@ class Args:
 
         parser.add_argument('--eval_batch_size', default=12, type=int)
         parser.add_argument('--eval_steps', default=100, type=int,
-                            help='多少步验证一次')
+                            help='how many steps between evaluations')
 
         # train args
         parser.add_argument('--train_epochs', default=15, type=int,
@@ -45,10 +45,10 @@ class Args:
 
         # 2e-5
         parser.add_argument('--lr', default=3e-5, type=float,
-                            help='bert学习率')
+                            help='learning rate for BERT')
         # 2e-3
         parser.add_argument('--other_lr', default=3e-4, type=float,
-                            help='bilstm和多层感知机学习率')
+                            help='learning rate for BiLSTM and MLP')
         # 0.5
         parser.add_argument('--max_grad_norm', default=1, type=float,
                             help='max grad clip')
@@ -63,7 +63,7 @@ class Args:
         parser.add_argument('--use_tensorboard', default="True")
         parser.add_argument('--use_efficient_globalpointer', default="True")
         parser.add_argument('--model_type', default="bert", help='bert or roberta')
-        parser.add_argument('--only_test', action='store_true', help='仅运行测试，不训练')
+        parser.add_argument('--only_test', action='store_true', help='only run test, skip training')
 
         return parser
 

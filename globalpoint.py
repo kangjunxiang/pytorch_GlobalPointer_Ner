@@ -4,11 +4,13 @@ import torch.nn as nn
 from transformers import AutoModel
 
 class MultilabelCategoricalCrossentropy(nn.Module):
-    """多标签分类的交叉熵
-    说明：y_true和y_pred的shape一致，y_true的元素非0即1， 1表示对应的类为目标类，0表示对应的类为非目标类。
-    警告：请保证y_pred的值域是全体实数，换言之一般情况下y_pred不用加激活函数，尤其是不能加sigmoid或者softmax！预测
-         阶段则输出y_pred大于0的类。如有疑问，请仔细阅读并理解本文。
-    参考：https://kexue.fm/archives/7359
+    """Multi-label categorical cross-entropy.
+    Note: y_true and y_pred have the same shape. Each element of y_true is either 0 or 1;
+        1 means the corresponding class is the target class, 0 means it is not.
+    Warning: y_pred is expected to be defined on the entire real line. In general, no
+        activation should be applied to y_pred; in particular, do NOT apply sigmoid or
+        softmax. At inference, classes with y_pred > 0 are predicted.
+    Reference: https://kexue.fm/archives/7359
     """
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -49,27 +51,28 @@ def get_sinusoid_encoding_table(n_position, d_hid, padding_idx=None):
 
 
 class RoPEPositionEncoding(nn.Module):
-    """旋转式位置编码: https://kexue.fm/archives/8265
+    """Rotary Position Encoding: https://kexue.fm/archives/8265
     """
     def __init__(self, max_position, embedding_size):
         super(RoPEPositionEncoding, self).__init__()
         position_embeddings = get_sinusoid_encoding_table(max_position, embedding_size)  # [seq_len, hdsz]
         cos_position = position_embeddings[:, 1::2].repeat_interleave(2, dim=-1)
         sin_position = position_embeddings[:, ::2].repeat_interleave(2, dim=-1)
-        # register_buffer是为了最外层model.to(device)，不用内部指定device
+        # register_buffer lets the outermost model.to(device) move these tensors without
+        # having to specify device inside this module.
         self.register_buffer('cos_position', cos_position)
         self.register_buffer('sin_position', sin_position)
     
     def forward(self, qw, seq_dim=-2):
-        # 默认最后两个维度为[seq_len, hdsz]
+        # Default last two dimensions are [seq_len, hdsz]
         seq_len = qw.shape[seq_dim]
         qw2 = torch.stack([-qw[..., 1::2], qw[..., ::2]], dim=-1).reshape_as(qw)
         return qw * self.cos_position[:seq_len] + qw2 * self.sin_position[:seq_len]
 
 
 class EfficientGlobalPointer(nn.Module):
-    """更加参数高效的GlobalPointer
-    参考：https://kexue.fm/archives/8877
+    """More parameter-efficient GlobalPointer.
+    Reference: https://kexue.fm/archives/8877
     """
     def __init__(self, hidden_size, heads, head_size, RoPE=True, max_len=512, use_bias=True, tril_mask=True):
         super().__init__()
@@ -86,30 +89,30 @@ class EfficientGlobalPointer(nn.Module):
 
     def forward(self, inputs, mask=None):
         ''' inputs: [..., hdsz]
-            mask: [bez, seq_len], padding部分为0
+            mask: [bz, seq_len], padding positions are 0
         '''
         sequence_output = self.p_dense(inputs)  # [..., head_size*2]
         qw, kw = sequence_output[..., :self.head_size], sequence_output[..., self.head_size:]  # [..., heads, head_size]
 
-        # ROPE编码
+        # ROPE encoding
         if self.RoPE:
             qw = self.position_embedding(qw)
             kw = self.position_embedding(kw)
 
-        # 计算内积
+        # Compute inner product
         logits = torch.einsum('bmd,bnd->bmn', qw, kw) / self.head_size**0.5  # [btz, seq_len, seq_len]
         bias_input = self.q_dense(sequence_output)  # [..., heads*2]
         bias = torch.stack(torch.chunk(bias_input, self.heads, dim=-1), dim=-2).transpose(1,2)  # [btz, head_size, seq_len,2]
         logits = logits.unsqueeze(1) + bias[..., :1] + bias[..., 1:].transpose(2, 3)  # [btz, head_size, seq_len, seq_len]
 
-        # 排除padding
+        # Mask out padding
         if mask is not None:
             attention_mask1 = 1 - mask.unsqueeze(1).unsqueeze(3)  # [btz, 1, seq_len, 1]
             attention_mask2 = 1 - mask.unsqueeze(1).unsqueeze(2)  # [btz, 1, 1, seq_len]
             logits = logits.masked_fill(attention_mask1.bool(), value=-float('inf'))
             logits = logits.masked_fill(attention_mask2.bool(), value=-float('inf'))
 
-        # 排除下三角
+        # Mask out the lower triangle
         if self.tril_mask:
             logits = logits - torch.tril(torch.ones_like(logits), -1) * 1e12
 
@@ -117,9 +120,9 @@ class EfficientGlobalPointer(nn.Module):
 
 
 class GlobalPointer(nn.Module):
-    """全局指针模块
-    将序列的每个(start, end)作为整体来进行判断
-    参考：https://kexue.fm/archives/8373
+    """Global pointer module.
+    Judges each (start, end) pair of the sequence as a whole.
+    Reference: https://kexue.fm/archives/8373
     """
     def __init__(self, hidden_size, heads, head_size, RoPE=True, max_len=512, use_bias=True, tril_mask=True):
         super().__init__()
@@ -137,32 +140,32 @@ class GlobalPointer(nn.Module):
 
     def forward(self, inputs, mask=None):
         ''' inputs: [..., hdsz]
-            mask: [bez, seq_len], padding部分为0
+            mask: [bz, seq_len], padding positions are 0
         '''
         # [batchsize, 150, 8*64*2]
         sequence_output = self.dense(inputs)  # [..., heads*head_size*2]
-        # torch.chunk(sequence_output, self.heads, dim=-1) 8个(batchsize, 150, 64*2)
+        # torch.chunk(sequence_output, self.heads, dim=-1) gives 8 tensors of shape (batchsize, 150, 64*2)
         # [batchsize, 150, 8, 64*2]
         sequence_output = torch.stack(torch.chunk(sequence_output, self.heads, dim=-1), dim=-2)  # [..., heads, head_size*2]
         # qw:[batchsize, 150, 8, 64], kw:[batchsize, 150, 8, 64]
         qw, kw = sequence_output[..., :self.head_size], sequence_output[..., self.head_size:]  # [..., heads, head_size]
 
-        # ROPE编码
+        # ROPE encoding
         if self.RoPE:
             qw = self.position_embedding(qw)
             kw = self.position_embedding(kw)
 
-        # 计算内积
+        # Compute inner product
         logits = torch.einsum('bmhd,bnhd->bhmn', qw, kw)  # [btz, heads, seq_len, seq_len]
 
-        # 排除padding
+        # Mask out padding
         if mask is not None:
             attention_mask1 = 1 - mask.unsqueeze(1).unsqueeze(3)  # [btz, 1, seq_len, 1]
             attention_mask2 = 1 - mask.unsqueeze(1).unsqueeze(2)  # [btz, 1, 1, seq_len]
             logits = logits.masked_fill(attention_mask1.bool(), value=-float('inf'))
             logits = logits.masked_fill(attention_mask2.bool(), value=-float('inf'))
 
-        # 排除下三角
+        # Mask out the lower triangle
         if self.tril_mask:
             logits = logits - torch.tril(torch.ones_like(logits), -1) * 1e12
 
@@ -185,7 +188,7 @@ class GlobalPointerNer(nn.Module):
         sequence_output = output[0]
         logits = self.global_pointer(sequence_output, attention_masks.gt(0).long())
         if labels is None:
-          # scale返回
+          # Scale and return
           return logits
         
         loss = self.criterion(logits, labels)

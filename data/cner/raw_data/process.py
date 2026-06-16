@@ -12,7 +12,7 @@ def preprocess(input_path, save_path, mode):
     tmp['id'] = 0
     tmp['text'] = ''
     tmp['labels'] = []
-    # =======先找出句子和句子中的所有实体和类型=======
+    # =======First, find the sentence and all entities/types in it=======
     with open(input_path,'r',encoding='utf-8') as fp:
         lines = fp.readlines()
         texts = []
@@ -54,7 +54,7 @@ def preprocess(input_path, save_path, mode):
         #     print(text, entity)
         # print(labels)
     # ==========================================
-    # =======找出句子中实体的位置=======
+    # =======Find the position of entities in the sentence=======
     i = 0
     for text,entity in zip(texts, entities):
 

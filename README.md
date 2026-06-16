@@ -1,13 +1,13 @@
 # pytorch_GlobalPointer_Ner
 
-基于pytorch的GlobalPointer进行中文命名实体识别。
+Chinese Named Entity Recognition based on GlobalPointer (PyTorch).
 
-模型分别来自于参考中的【1】【2】。这里还是按照之前命名实体识别的相关模板，具体模型的介绍及预备知识请移步参考里面的链接。复现方式：
+The models come from references [1] and [2]. This project follows the existing NER template; for model details and prerequisites please refer to the links in the references. Reproduction steps:
 
-- 1、使用 convert_data.py 将CMeEE 原始数据处理为mid_data下的数据。
-- 2、根据参数运行main.py以进行训练、验证、测试和预测。
+- 1. Run `convert_data.py` to convert the raw CMeEE data into the format under `mid_data/`.
+- 2. Run `main.py` with the arguments below to train, validate, test, and predict.
 
-# 依赖
+# Dependencies
 
 ```
 pytorch==1.6.0
@@ -15,7 +15,7 @@ transformers==4.5.0
 seqeval
 ```
 
-# 运行
+# Run
 
 ```python
 python main.py \
@@ -43,18 +43,16 @@ python main.py \
 --use_efficient_globalpointer="True"
 ```
 
-### 结果
+### Results
 
-globalpoint2.py也是可以用的，要选择它需要将main.py导入修改为```import globalpoint2```，并在使用模型时改为```globalpoint2.GlobalPointerNer```，模型名字自己设置为bert-2，参数use_efficient_globalpointer没有作用，因为是针对globalpoint.py的。
+`globalpoint2.py` is also usable. To use it, change the import in `main.py` to `import globalpoint2`, and use `globalpoint2.GlobalPointerNer` when constructing the model (set the model name to `bert-2` yourself). Note that `use_efficient_globalpointer` has no effect for `globalpoint2.py` because that flag only applies to `globalpoint.py`.
 
+By default the model from `globalpoint.py` is used, which includes both `GlobalPointer` and `EfficientGlobalPointer`. Switch between them via the `use_efficient_globalpointer` flag.
 
-默认使用的是globalpoint.py里面的模型，包含globalpointer和efficient-globalpoint，通过修改use_efficient_globalpointer来指定选择的模型
+### Notes
 
+If the performance is poor, try reducing the learning rate.
 
-### 补充
+# Acknowledgements
 
-如果效果不好，尝试调小一些学习率。
-
-# 鸣谢
-
-感谢TPLinker开源项目作者 [taishan1994](https://github.com/taishan1994)
+Thanks to the author of the TPLinker open-source project: [taishan1994](https://github.com/taishan1994)
